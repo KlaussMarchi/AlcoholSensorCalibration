@@ -14,59 +14,42 @@ unsigned long espMillis(){
     return esp_timer_get_time()/1000;
 }
 
-bool checkAddress(int address, int timeout) {
-    const unsigned long startTime = espMillis();
-
-    if(sensor_debug)
-        return true;
-
-    while(espMillis() - startTime < timeout || timeout == 0){
-        Wire.beginTransmission(address);
-
-        if(Wire.endTransmission() == 0)
-            return true;
-
-        if(timeout == 0)
-            return false;
-
-        delay(10);
-    }
-
-    return false;
-}
-
-int getAlcohol(){
+float getAlcohol(){
     static unsigned long startTime;
-    static float X_n1, X_n2;
-    static float Y_n1, Y_n2;
+    static const byte xSize=2, ySize=3;
+    static float Xn[xSize] = {0};
+    static float Yn[ySize] = {0};
 
-    if(espMillis() - startTime < 50)
-        return Y_n1;
+    if(espMillis() - startTime < 100)
+        return Yn[0];
+
+    if(!tryConnection(ALC_SENSOR_ADDR))
+        return -1;
 
     startTime = espMillis();
-    
-    if(!checkAddress(ALC_SENSOR_ADDR, 0))
-        return -1;
-    
-    const float X_n = ads.readADC_SingleEnded(MQ303_PIN);
-    const float Y_n = X_n*(0.558698) + X_n1*(0.257307) + Y_n1*(0.292448) + Y_n2*(-0.108453);
 
-    Y_n2 = Y_n1; Y_n1 = Y_n;
-    X_n2 = X_n1; X_n1 = X_n;
-    return Y_n;
+    for(byte n=xSize-1; n>0; n--)
+        Xn[n] = Xn[n-1];
+
+    for(byte n=ySize-1; n>0; n--) 
+        Yn[n] = Yn[n-1];
+
+    Xn[0] = ads.readADC_SingleEnded(MQ303_PIN);
+    Yn[0] = Xn[0]*(0.016239) + Xn[1]*(0.014858) + Yn[1]*(1.734903) + Yn[2]*(-0.766000);
+    return Yn[0];
 }
 
-int getAnalogValue(const bool filterOn){
-    int analog = getAlcohol();
-
+int getAnalogValue(bool filter){
     if(analog_debug)
         return 23000;
 
-    if(analog == -1)
-        return -1;
-
-    if(!filterOn)
+    if(!filter)
         return ads.readADC_SingleEnded(MQ303_PIN);
+
+    const int analog = getAlcohol();
+
+    if(analog == -1 || analog == 0)
+        return -1;
     
     if(analog < 1000 || analog > 50000)
         return -1;
@@ -96,3 +79,30 @@ void loop(){
     delay(20);
 }
 
+bool tryConnection(int address){
+    if(sensor_debug)
+        return true;
+    
+    Wire.beginTransmission(address);
+
+    if(Wire.endTransmission() == 0)
+        return true;
+
+    return false;
+}
+
+bool checkAddress(int address, int timeout){
+    const unsigned long startTime = espMillis();
+
+    if(sensor_debug) 
+        return true;
+
+    while(espMillis() - startTime < timeout){
+        if(tryConnection(address))
+            return true;
+
+        delay(100);
+    }
+    
+    return false;
+}
